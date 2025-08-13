@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>批量 IP 在线解析（纯前端・永久免费托管友好）</title>
+  <meta name="description" content="支持 IPv4/IPv6 的批量 IP 解析工具；可在 GitHub Pages/Netlify/Vercel 等永久免费托管平台直接使用。" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .chip { padding: 2px 8px; border-radius: 9999px; font-size: 12px; border:1px solid #e5e7eb; background:#fff; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-6xl mx-auto p-6">
+    <header class="mb-6">
+      <h1 class="text-2xl md:text-3xl font-bold">批量 IP 在线解析</h1>
+      <p class="text-sm text-gray-600 mt-1">支持 IPv4 / IPv6，单次最多 <b>6000</b> 条。可直接托管到 <span class="chip">GitHub Pages</span> <span class="chip">Netlify</span> <span class="chip">Vercel</span> 等永久免费站点。</p>
+      <p id="httpsWarn" class="text-xs text-amber-700 mt-2 hidden">提示：你当前处于 <span class="mono" id="proto"></span>。若使用 <span class="mono">ip-api.com（HTTP）</span> 模式，在 HTTPS 站点会被浏览器拦截（混合内容）。已自动选择 HTTPS 供应商。</p>
+    </header>
+
+    <section class="grid md:grid-cols-3 gap-4 items-start">
+      <div class="md:col-span-2">
+        <textarea id="ipInput" class="w-full h-56 p-3 border rounded-2xl focus:outline-none focus:ring shadow mono" placeholder="每行一个 IP，或使用逗号/空格分隔"></textarea>
+        <div class="flex items-center gap-3 mt-3">
+          <input type="file" id="fileInput" accept=".txt,.csv" class="block text-sm" />
+          <button id="startBtn" class="px-4 py-2 rounded-2xl bg-black text-white shadow">开始解析</button>
+          <button id="clearBtn" class="px-4 py-2 rounded-2xl bg-white border shadow">清空</button>
+        </div>
+        <p class="text-xs text-gray-500 mt-2">也可以上传 .txt/.csv 文件；工具将自动去重并过滤非法 IP。</p>
+      </div>
+
+      <div class="md:col-span-1 p-4 bg-white rounded-2xl border shadow">
+        <h2 class="font-semibold mb-2">设置</h2>
+        <label class="block text-sm mb-2">解析供应商
+          <select id="provider" class="w-full mt-1 border rounded-xl p-2">
+            <option value="auto" selected>自动（优先 HTTPS：ipwho.is → ipapi.co → ip.sb）</option>
+            <option value="ipwhois">仅 ipwho.is（HTTPS，单 IP）</option>
+            <option value="ipapico">仅 ipapi.co（HTTPS，单 IP）</option>
+            <option value="ipsb">仅 ip.sb（HTTPS，单 IP）</option>
+            <option value="ipapi_http">ip-api.com（HTTP，批量，快，但仅适用于 file:// 或 http://）</option>
+          </select>
+        </label>
+
+        <label class="block text-sm mb-2">并发数（单 IP 模式）
+          <input id="concurrency" type="number" min="1" max="50" value="12" class="w-full mt-1 border rounded-xl p-2" />
+        </label>
+
+        <div class="mt-3">
+          <h3 class="font-semibold mb-1">进度</h3>
+          <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+            <div id="bar" class="bg-gray-900 h-3 w-0"></div>
+          </div>
+          <div id="progressText" class="text-sm mt-2">等待开始…</div>
+          <div id="stat" class="text-xs text-gray-500 mt-1"></div>
+          <div id="rejectedWrap" class="text-xs text-amber-700 mt-2 hidden"></div>
+          <div class="mt-3 flex gap-2">
+            <button id="exportCsv" class="px-3 py-2 rounded-2xl bg-white border shadow disabled:opacity-50" disabled>导出 CSV</button>
+            <button id="copyJson" class="px-3 py-2 rounded-2xl bg-white border shadow disabled:opacity-50" disabled>复制 JSON</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mt-6">
+      <div class="flex items-center justify-between mb-2">
+        <h2 class="text-lg font-semibold">解析结果</h2>
+        <label class="text-sm text-gray-500">
+          <input id="onlySuccess" type="checkbox" class="mr-1">仅显示成功
+        </label>
+      </div>
+      <div class="overflow-auto bg-white rounded-2xl border shadow">
+        <table class="min-w-full text-sm" id="resultTable">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="px-3 py-2 border-b text-left">IP</th>
+              <th class="px-3 py-2 border-b text-left">状态</th>
+              <th class="px-3 py-2 border-b text-left">国家</th>
+              <th class="px-3 py-2 border-b text-left">省/州</th>
+              <th class="px-3 py-2 border-b text-left">城市</th>
+              <th class="px-3 py-2 border-b text-left">ISP</th>
+              <th class="px-3 py-2 border-b text-left">组织</th>
+              <th class="px-3 py-2 border-b text-left">纬度</th>
+              <th class="px-3 py-2 border-b text-left">经度</th>
+              <th class="px-3 py-2 border-b text-left">错误信息</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <p class="text-xs text-gray-500 mt-2">说明：不同供应商字段命名略有差异，工具已做字段映射与兜底合并。</p>
+    </section>
+
+    <footer class="text-xs text-gray-400 mt-6">
+      开源/自托管建议：将此 HTML 放入 GitHub 仓库并开启 <span class="mono">Pages</span>，即可获得永久 HTTPS 网址；或直接拖拽到 Netlify/Vercel。
+    </footer>
+  </div>
+
+<script>
+const MAX_IPS = 6000;
+const BATCH_SIZE = 100;
+const SLEEP_MS = 750;
+
+const els = {
+  ipInput: document.getElementById('ipInput'),
+  fileInput: document.getElementById('fileInput'),
+  startBtn: document.getElementById('startBtn'),
+  clearBtn: document.getElementById('clearBtn'),
+  bar: document.getElementById('bar'),
+  progressText: document.getElementById('progressText'),
+  stat: document.getElementById('stat'),
+  tbody: document.getElementById('tbody'),
+  onlySuccess: document.getElementById('onlySuccess'),
+  exportCsv: document.getElementById('exportCsv'),
+  copyJson: document.getElementById('copyJson'),
+  provider: document.getElementById('provider'),
+  concurrency: document.getElementById('concurrency'),
+  rejectedWrap: document.getElementById('rejectedWrap'),
+  httpsWarn: document.getElementById('httpsWarn'),
+  proto: document.getElementById('proto'),
+};
+
+// Warn about HTTPS mixed content
+(function(){
+  const proto = location.protocol.replace(':','');
+  els.proto.textContent = proto;
+  if (proto === 'https') {
+    els.httpsWarn.classList.remove('hidden');
+    if (els.provider.value === 'ipapi_http') {
+      els.provider.value = 'auto';
+    }
+  }
+})();
+
+function setProgress(done, total) {
+  const pct = total ? Math.round(done * 100 / total) : 0;
+  els.bar.style.width = pct + '%';
+  els.progressText.textContent = total ? `已完成 ${done}/${total}（${pct}%）` : '等待开始…';
+}
+
+function isLikelyIP(s) {
+  if (!s) return false;
+  const t = s.trim().replace(/^\[/,'').replace(/\]$/,'');
+  const isIPv4 = /^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(t);
+  const isIPv6 = /:/.test(t) && /^[0-9a-fA-F:]+$/.test(t);
+  return isIPv4 || isIPv6;
+}
+
+function normalizeIPs(input) {
+  const raw = input.split(/\\r?\\n|,|\\s+/).map(s => s.trim()).filter(Boolean);
+  const rejected = raw.filter(x => !isLikelyIP(x));
+  const uniq = Array.from(new Set(raw.filter(isLikelyIP)));
+  return { ips: uniq, rejected };
+}
+
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+// ===== Providers (HTTPS-first) =====
+// ipwho.is — HTTPS, no auth, per IP
+async function fetch_ipwhois(ip){
+  const url = `https://ipwho.is/${encodeURIComponent(ip)}?lang=en`;
+  const r = await fetch(url, { mode: 'cors' });
+  const j = await r.json();
+  if (j && (j.success === true || j.success === undefined)) {
+    return {
+      query: ip,
+      status: 'success',
+      country: j.country || '',
+      regionName: j.region || j.region_name || '',
+      city: j.city || '',
+      isp: (j.connection && (j.connection.isp || j.connection.org)) || j.isp || '',
+      org: (j.connection && j.connection.org) || j.org || '',
+      lat: j.latitude ?? j.lat ?? '',
+      lon: j.longitude ?? j.lon ?? '',
+      _src: 'ipwho.is'
+    };
+  }
+  throw new Error(j && j.message ? j.message : 'ipwho.is 未返回成功');
+}
+
+// ipapi.co — HTTPS, no auth (有限额), per IP
+async function fetch_ipapico(ip){
+  const url = `https://ipapi.co/${encodeURIComponent(ip)}/json/`;
+  const r = await fetch(url, { mode: 'cors' });
+  const j = await r.json();
+  if (j && !j.error) {
+    return {
+      query: ip,
+      status: 'success',
+      country: j.country_name || j.country || '',
+      regionName: j.region || j.region_code || '',
+      city: j.city || '',
+      isp: j.org || j.asn_org || '',
+      org: j.org || j.asn_org || '',
+      lat: j.latitude ?? j.lat ?? '',
+      lon: j.longitude ?? j.lon ?? '',
+      _src: 'ipapi.co'
+    };
+  }
+  throw new Error(j && j.reason ? j.reason : 'ipapi.co 未返回成功');
+}
+
+// ip.sb — HTTPS, per IP （若跨域策略变动，可能需更换或放弃）
+async function fetch_ipsb(ip){
+  const url = `https://api.ip.sb/geoip/${encodeURIComponent(ip)}`;
+  const r = await fetch(url, { mode: 'cors' });
+  const j = await r.json();
+  if (j && (j.country || j.region || j.city)) {
+    return {
+      query: ip,
+      status: 'success',
+      country: j.country || '',
+      regionName: j.region || j.region_name || '',
+      city: j.city || '',
+      isp: j.isp || j.organization || '',
+      org: j.organization || j.org || '',
+      lat: j.latitude ?? j.lat ?? '',
+      lon: j.longitude ?? j.lon ?? '',
+      _src: 'ip.sb'
+    };
+  }
+  throw new Error('ip.sb 未返回成功');
+}
+
+// ip-api.com — HTTP only, batch
+async function fetch_ipapi_batch(batch){
+  const url = 'http://ip-api.com/batch?fields=status,message,query,country,regionName,city,isp,org,lat,lon';
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(batch)
+  });
+  const j = await r.json();
+  return j.map(x => ({
+    query: x.query || '',
+    status: x.status || 'fail',
+    country: x.country || '',
+    regionName: x.regionName || '',
+    city: x.city || '',
+    isp: x.isp || '',
+    org: x.org || '',
+    lat: x.lat ?? '',
+    lon: x.lon ?? '',
+    message: x.message || '',
+    _src: 'ip-api.com'
+  }));
+}
+
+async function resolveSingle(ip, order){
+  for (const fn of order) {
+    try {
+      return await fn(ip);
+    } catch (e) {
+      // continue
+    }
+  }
+  return { query: ip, status: 'fail', message: '所有 HTTPS 供应商均失败' };
+}
+
+function chunk(arr, size){
+  const out = [];
+  for (let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size));
+  return out;
+}
+
+async function resolveAll(ips, mode, concurrency){
+  const results = [];
+  if (mode === 'ipapi_http') {
+    // fast batch mode (only works on http:// or file://)
+    const batches = chunk(ips, BATCH_SIZE);
+    for (let i=0;i<batches.length;i++) {
+      try {
+        const part = await fetch_ipapi_batch(batches[i]);
+        results.push(...part);
+      } catch (e) {
+        results.push(...batches[i].map(ip => ({ query: ip, status: 'fail', message: 'HTTP 批量请求失败' })));
+      }
+      setProgress(Math.min(ips.length, (i+1)*BATCH_SIZE), ips.length);
+      if (i+1 < batches.length) await sleep(SLEEP_MS);
+    }
+    return results;
+  }
+
+  // HTTPS single-IP mode with concurrency control
+  let done = 0;
+  const q = [...ips];
+  const order = (mode === 'ipwhois') ? [fetch_ipwhois]
+              : (mode === 'ipapico') ? [fetch_ipapico]
+              : (mode === 'ipsb') ? [fetch_ipsb]
+              : [fetch_ipwhois, fetch_ipapico, fetch_ipsb]; // auto
+  const workers = Array.from({length: Math.min(concurrency, ips.length)}, () => (async () => {
+    while (q.length) {
+      const ip = q.shift();
+      const res = await resolveSingle(ip, order);
+      results.push(res);
+      done++;
+      setProgress(done, ips.length);
+      await sleep(30);
+    }
+  })());
+  await Promise.all(workers);
+  return results;
+}
+
+// ===== UI handlers =====
+let lastResults = [];
+
+function renderTable(rows){
+  els.tbody.innerHTML = '';
+  const filtered = els.onlySuccess.checked ? rows.filter(r => r.status === 'success') : rows;
+  for (const r of filtered) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="px-3 py-2 border-b whitespace-nowrap mono">${r.query || ''}</td>
+      <td class="px-3 py-2 border-b">${r.status || ''}</td>
+      <td class="px-3 py-2 border-b">${r.country || ''}</td>
+      <td class="px-3 py-2 border-b">${r.regionName || ''}</td>
+      <td class="px-3 py-2 border-b">${r.city || ''}</td>
+      <td class="px-3 py-2 border-b">${r.isp || ''}</td>
+      <td class="px-3 py-2 border-b">${r.org || ''}</td>
+      <td class="px-3 py-2 border-b">${r.lat ?? ''}</td>
+      <td class="px-3 py-2 border-b">${r.lon ?? ''}</td>
+      <td class="px-3 py-2 border-b text-red-600">${r.message || ''}</td>
+    `;
+    els.tbody.appendChild(tr);
+  }
+  els.stat.textContent = `展示 ${filtered.length} 条 / 总计 ${rows.length} 条`;
+}
+
+function csvEscape(v){
+  const s = (v ?? '').toString();
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+
+function toCSV(rows){
+  const header = ['IP','状态','国家','省/州','城市','ISP','组织','纬度','经度','错误信息','来源'];
+  const lines = [header.join(',')];
+  for (const r of rows) {
+    lines.push([
+      r.query||'', r.status||'', r.country||'', r.regionName||'', r.city||'', r.isp||'', r.org||'', r.lat??'', r.lon??'', r.message||'', r._src||''
+    ].map(csvEscape).join(','));
+  }
+  return lines.join('\n');
+}
+
+els.onlySuccess.addEventListener('change', () => renderTable(lastResults));
+
+els.clearBtn.addEventListener('click', () => {
+  els.ipInput.value = '';
+  els.tbody.innerHTML = '';
+  setProgress(0,0);
+  els.rejectedWrap.classList.add('hidden');
+  els.exportCsv.disabled = true;
+  els.copyJson.disabled = true;
+  els.stat.textContent = '';
+});
+
+els.fileInput.addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  const joiner = els.ipInput.value && !els.ipInput.value.endsWith('\\n') ? '\\n' : '';
+  els.ipInput.value += joiner + text;
+});
+
+els.startBtn.addEventListener('click', async () => {
+  const { ips, rejected } = normalizeIPs(els.ipInput.value);
+  if (!ips.length) return alert('请输入有效 IP');
+  if (ips.length > MAX_IPS) return alert(`单次最多 ${MAX_IPS} 个 IP（当前 ${ips.length}）`);
+
+  lastResults = [];
+  renderTable(lastResults);
+  setProgress(0, ips.length);
+  els.exportCsv.disabled = true;
+  els.copyJson.disabled = true;
+  els.rejectedWrap.classList.add('hidden');
+  els.stat.textContent = '';
+
+  if (rejected.length) {
+    els.rejectedWrap.classList.remove('hidden');
+    els.rejectedWrap.textContent = `已忽略 ${rejected.length} 条非 IP 内容（示例：${rejected.slice(0,5).join('、')}${rejected.length>5?'…':''}）`;
+  }
+
+  const mode = els.provider.value;
+  if (mode === 'ipapi_http' && location.protocol === 'https:') {
+    alert('你在 HTTPS 页面，浏览器会拦截 HTTP 请求（混合内容）。请改用「自动/HTTPS 供应商」或在本地/HTTP 环境打开。');
+    return;
+  }
+
+  const conc = Math.max(1, Math.min(50, parseInt(els.concurrency.value || '12', 10)));
+  els.progressText.textContent = '解析中…';
+  const start = performance.now();
+  const rows = await resolveAll(ips, mode, conc);
+  const elapsed = (performance.now() - start) / 1000;
+  lastResults = rows;
+  renderTable(rows);
+  els.progressText.textContent = `完成：共 ${ips.length} 条，用时 ${elapsed.toFixed(1)}s`;
+  els.exportCsv.disabled = false;
+  els.copyJson.disabled = false;
+});
+
+els.exportCsv.addEventListener('click', () => {
+  const csv = toCSV(lastResults);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'ip_lookup_results.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+});
+
+els.copyJson.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(lastResults, null, 2));
+    els.copyJson.textContent = '已复制';
+    setTimeout(() => (els.copyJson.textContent = '复制 JSON'), 1200);
+  } catch {
+    alert('复制失败，请手动选择文本复制');
+  }
+});
+</script>
+</body>
+</html>
